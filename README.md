@@ -5,6 +5,15 @@ Pytorch==1.12.1
 kornia
 
 
-# train.py for AT on CIFAR-10 and CIFAR-100
+# train CIFAR-10 and CIFAR-100 with ResNet-18
 
-# train_tiny.py for AT on Tiny-ImageNet
+```
+python train.py --arch ResNet18 --data CIFAR10
+```
+
+
+# train_tiny.py for AT on Tiny-ImageNet with ResNet-18
+
+```
+python train_tiny.py --arch ResNet18
+```
