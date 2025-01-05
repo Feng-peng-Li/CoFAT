@@ -12,7 +12,7 @@ python train.py --arch ResNet18 --data CIFAR10
 ```
 
 
-# train_tiny.py for AT on Tiny-ImageNet with ResNet-18
+# train_tiny for AT on Tiny-ImageNet with ResNet-18
 
 ```
 python train_tiny.py --arch ResNet18
