@@ -17,7 +17,7 @@ from PIL import Image
 
 from models.resnet import ResNet18
 import models
-
+from extraction_core import core_extraction
 import torchvision
 import kornia.augmentation as K
 
@@ -165,36 +165,7 @@ kwargs = {'num_workers': 2, 'pin_memory': True} if use_cuda else {}
 # verbose = dist.get_rank() == 0
 
 # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-class CropShift(torch.nn.Module):
-    def __init__(self, low, high=None):
-        super().__init__()
-        high = low if high is None else high
-        self.low, self.high = int(low), int(high)
 
-    def sample_top(self, x, y):
-        x = torch.randint(0, x + 1, (1,)).item()
-        y = torch.randint(0, y + 1, (1,)).item()
-        return x, y
-
-    def forward(self, img):
-        if self.low == self.high:
-            strength = self.low
-        else:
-            strength = torch.randint(self.low, self.high, (1,)).item()
-
-        w, h = TF.get_image_size(img)
-        crop_x = torch.randint(0, strength + 1, (1,)).item()
-        crop_y = strength - crop_x
-        crop_w, crop_h = w - crop_x, h - crop_y
-
-        top_x, top_y = self.sample_top(crop_x, crop_y)
-
-        img = TF.crop(img, top_y, top_x, crop_h, crop_w)
-        img = TF.pad(img, padding=[crop_x, crop_y], fill=0)
-
-        top_x, top_y = self.sample_top(crop_x, crop_y)
-
-        return TF.crop(img, top_y, top_x, h, w)
 
 
 transform_train = transforms.Compose([
@@ -424,15 +395,16 @@ def adv_train(model, c_criterion, class_center, soft_label, label_rem, train_loa
             soft_target = target_one * (1 - alpha_t) + alpha_t * soft_pred
             # soft_target = target_one
 
-            # soft_pred1 = obtain_c_soft(center=class_center, feature=soft_label1[index])
+            soft_pred1 = obtain_c_soft(center=class_center, feature=soft_label1[index])
             # # # # # # soft_pred=soft_tar**2+target_one.detach()-torch.mean(soft_tar**2,dim=0,keepdim=True)
-            # soft_target1 = target_one * (1 - alpha_t) + alpha_t * soft_pred1
+            soft_target1 = target_one * (1 - alpha_t) + alpha_t * soft_pred1
 
 
         else:
             soft_target = target_one
             soft_target1 = target_one
-
+        logits_na, feature_na, f_map_na = model(x_natural, if_f=True)
+        x_core=core_extraction(x_natural.detach(),f_map_na.detach())
         x_adv = perturb_input(model=model,
                               x_natural=x_natural,
                               class_center=class_center,
@@ -446,16 +418,39 @@ def adv_train(model, c_criterion, class_center, soft_label, label_rem, train_loa
                               perturb_steps=num_steps,
                               distance=args.norm,
                               no_core=True)
+
+        x_core_adv = perturb_input(model=model,
+                              x_natural=x_core,
+                              class_center=class_center,
+                              target=target,
+                              target_soft=soft_target1,
+                              target_alpha=alpha_t,
+                              epoch=epoch,
+                              c_center=c_criterion,
+                              step_size=step_size,
+                              epsilon=epsilon,
+                              perturb_steps=num_steps,
+                              distance=args.norm,
+                              no_core=True)
+
         model.train()
 
         logits_adv_na, adv_na_feature, f_map_adv = model(x_adv, if_f=True)
         logits_na, feature_na, f_map_na = model(x_natural, if_f=True)
+
+        logits_adv_core, adv_core_feature, _ = model(x_adv_core, if_f=True)
+        logits_core, feature_core, _ = model(x_core, if_f=True)
 
         # loss_robust_na = F.kl_div(F.log_softmax(logits_adv_na, dim=1),
         #                           F.softmax(logits_na, dim=1),
         #                           reduction='batchmean')
         loss_robust_na = symmkl(logits_adv_na, logits_na)
         loss_natural = CE(logits_na, soft_target)
+
+        loss_robust_core = symmkl(logits_adv_core, logits_core)
+        loss_core = CE(logits_core, soft_target1)
+
+        loss=(loss_core+loss_natural)/2.+args.beta*(loss_robust_core+loss_robust_na)/2.
 
         if epoch >= args.awp_warmup:
             awp = awp_adversary.calc_awp(inputs_adv=x_adv, inputs_clean=x_natural, targets=target, beta=args.beta,
@@ -465,9 +460,9 @@ def adv_train(model, c_criterion, class_center, soft_label, label_rem, train_loa
         if epoch >= 0:
             loss_contrast = args.w * (c_criterion(
                 F.softmax(adv_na_feature, dim=1), class_center, target))
-            loss = (loss_natural + args.beta * loss_robust_na) + loss_contrast
-        else:
-            loss = loss_natural + args.beta * loss_robust_na
+            loss = loss + loss_contrast
+        # else:
+        #     loss = loss_natural + args.beta * loss_robust_na
 
         # + args.beta * loss_robust_core + args.beta * loss_robust_na
         optimizer.zero_grad()
