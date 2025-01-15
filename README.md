@@ -5,10 +5,24 @@ Pytorch==1.12.1
 kornia
 
 
-# train CIFAR-10 and CIFAR-100 with ResNet-18
+# train CIFAR-10 and CIFAR-100 with ResNet-18 without core partners
 
 ```
 python train.py --arch ResNet18 --data CIFAR10
+```
+
+```
+python train.py --arch ResNet18 --data CIFAR100
+```
+
+# train CIFAR-10 and CIFAR-100 with ResNet-18 with core partners
+
+```
+python train_co.py --arch ResNet18 --data CIFAR10
+```
+
+```
+python train_co.py --arch ResNet18 --data CIFAR100
 ```
 
 
